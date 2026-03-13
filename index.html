@@ -1,291 +1,205 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta charset="UTF-8">
-<title>Procedural Planet Noise System</title>
-
-<style>
-body{
-margin:0;
-overflow:hidden;
-background:#000;
-font-family:Arial;
-}
-
-#controls{
-position:absolute;
-top:20px;
-left:20px;
-background:white;
-padding:15px;
-border-radius:6px;
-width:220px;
-}
-
-button{
-margin-top:10px;
-width:100%;
-padding:6px;
-}
-</style>
+    <meta charset="UTF-8">
+    <title>Advanced Procedural Planet System</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #050505; font-family: 'Segoe UI', Arial, sans-serif; }
+        #controls {
+            position: absolute; top: 20px; left: 20px;
+            background: rgba(255, 255, 255, 0.9); padding: 20px;
+            border-radius: 12px; width: 240px; box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        }
+        h3 { margin: 0 0 15px 0; color: #333; font-size: 18px; border-bottom: 1px solid #ccc; pb: 5px; }
+        .label-group { display: flex; justify-content: space-between; font-size: 12px; font-weight: bold; margin-top: 10px; }
+        input { width: 100%; cursor: pointer; margin: 5px 0 10px 0; }
+        button {
+            margin-top: 10px; width: 100%; padding: 10px;
+            cursor: pointer; border: none; border-radius: 5px;
+            background: #2c3e50; color: white; font-weight: bold; transition: 0.3s;
+        }
+        button:hover { background: #34495e; }
+        #sound { background: #27ae60; }
+        #sound:hover { background: #2ecc71; }
+    </style>
 </head>
-
 <body>
 
 <div id="controls">
+    <h3>Planet Generator</h3>
+    
+    <div class="label-group"><span>Scale</span><span id="v-scale">50</span></div>
+    <input type="range" id="scale" min="10" max="150" value="50">
 
-<h3>Planet Controls</h3>
+    <div class="label-group"><span>Amplitude</span><span id="v-amp">8</span></div>
+    <input type="range" id="amp" min="1" max="25" value="8">
 
-Scale
-<input type="range" id="scale" min="10" max="150" value="50">
+    <div class="label-group"><span>Detail (Octaves)</span><span id="v-oct">4</span></div>
+    <input type="range" id="oct" min="1" max="8" value="4">
 
-Amplitude
-<input type="range" id="amp" min="1" max="20" value="8">
-
-Octaves
-<input type="range" id="oct" min="1" max="6" value="4">
-
-<button id="regen">Regenerate</button>
-
+    <button id="regen">Regenerate Planet</button>
+    <button id="sound">Play Terrain Sound</button>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 
 <script>
+let scene, camera, renderer, planet, audioCtx;
 
-/* ---------------- PERLIN NOISE ---------------- */
-
-class PerlinNoise{
-
-constructor(){
-this.p=[];
-
-for(let i=0;i<256;i++){
-this.p[i]=i;
-}
-
-for(let i=255;i>0;i--){
-let j=Math.floor(Math.random()*(i+1));
-[this.p[i],this.p[j]]=[this.p[j],this.p[i]];
-}
-
-this.p=this.p.concat(this.p);
-}
-
-fade(t){
-return t*t*t*(t*(t*6-15)+10);
-}
-
-lerp(t,a,b){
-return a+t*(b-a);
-}
-
-grad(hash,x,y,z){
-
-let h=hash&15;
-
-let u=h<8?x:y;
-let v=h<4?y:h===12||h===14?x:z;
-
-return((h&1)===0?u:-u)+((h&2)===0?v:-v);
-
-}
-
-noise(x,y,z){
-
-let X=Math.floor(x)&255;
-let Y=Math.floor(y)&255;
-let Z=Math.floor(z)&255;
-
-x-=Math.floor(x);
-y-=Math.floor(y);
-z-=Math.floor(z);
-
-let u=this.fade(x);
-let v=this.fade(y);
-let w=this.fade(z);
-
-let A=this.p[X]+Y;
-let AA=this.p[A]+Z;
-let AB=this.p[A+1]+Z;
-let B=this.p[X+1]+Y;
-let BA=this.p[B]+Z;
-let BB=this.p[B+1]+Z;
-
-return this.lerp(w,
-
-this.lerp(v,
-
-this.lerp(u,this.grad(this.p[AA],x,y,z),
-this.grad(this.p[BA],x-1,y,z)),
-
-this.lerp(u,this.grad(this.p[AB],x,y-1,z),
-this.grad(this.p[BB],x-1,y-1,z))
-),
-
-this.lerp(v,
-
-this.lerp(u,this.grad(this.p[AA+1],x,y,z-1),
-this.grad(this.p[BA+1],x-1,y,z-1)),
-
-this.lerp(u,this.grad(this.p[AB+1],x,y-1,z-1),
-this.grad(this.p[BB+1],x-1,y-1,z-1))
-)
-
-);
-
-}
-
-}
-
-/* ---------------- THREE SETUP ---------------- */
-
-let scene,camera,renderer,planet;
-let noise=new PerlinNoise();
-
-const params={
-scale:50,
-amp:8,
-oct:4
+const params = {
+    scale: 50,
+    amp: 8,
+    oct: 4
 };
 
-function init(){
+// Layered Noise Logic (Fractal Brownian Motion)
+function getLayeredNoise(x, y, z, octaves) {
+    let total = 0;
+    let frequency = 1.0;
+    let amplitude = 1.0;
+    let maxValue = 0; 
 
-scene=new THREE.Scene();
-
-camera=new THREE.PerspectiveCamera(
-70,
-window.innerWidth/window.innerHeight,
-0.1,
-1000
-);
-
-camera.position.z=80;
-
-renderer=new THREE.WebGLRenderer({antialias:true});
-renderer.setSize(window.innerWidth,window.innerHeight);
-
-document.body.appendChild(renderer.domElement);
-
-const light=new THREE.DirectionalLight(0xffffff,1);
-light.position.set(50,50,50);
-scene.add(light);
-
-generatePlanet();
-
-animate();
-
+    for (let i = 0; i < octaves; i++) {
+        // Using 3D-ish Sine layers to simulate Perlin complexity
+        total += (Math.sin(x * frequency) * Math.cos(y * frequency) + Math.sin(z * frequency)) * amplitude;
+        maxValue += amplitude;
+        amplitude *= 0.5; // Persistence
+        frequency *= 2.0; // Lacunarity
+    }
+    return total / maxValue;
 }
 
-/* ---------------- FRACTAL NOISE ---------------- */
+function init() {
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.z = 80;
 
-function fractalNoise(x,y,z){
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    document.body.appendChild(renderer.domElement);
 
-let total=0;
-let frequency=1;
-let amplitude=1;
-let maxValue=0;
+    // Lights
+    const sun = new THREE.DirectionalLight(0xffffff, 1.2);
+    sun.position.set(50, 50, 50);
+    scene.add(sun);
+    scene.add(new THREE.AmbientLight(0x222244));
 
-for(let i=0;i<params.oct;i++){
-
-total+=noise.noise(
-x*frequency,
-y*frequency,
-z*frequency
-)*amplitude;
-
-maxValue+=amplitude;
-
-amplitude*=0.5;
-frequency*=2;
-
+    generatePlanet();
+    animate();
 }
 
-return total/maxValue;
+function generatePlanet() {
+    if (planet) {
+        planet.geometry.dispose();
+        planet.material.dispose();
+        scene.remove(planet);
+    }
 
+    // High resolution sphere for detail
+    const geo = new THREE.SphereGeometry(30, 128, 128);
+    const pos = geo.attributes.position;
+    const colors = [];
+    const colorObj = new THREE.Color();
+
+    for (let i = 0; i < pos.count; i++) {
+        let v = new THREE.Vector3().fromBufferAttribute(pos, i);
+
+        // Calculate layered height
+        let n = getLayeredNoise(
+            v.x / params.scale, 
+            v.y / params.scale, 
+            v.z / params.scale, 
+            params.oct
+        );
+
+        let h = n * params.amp;
+        v.normalize().multiplyScalar(30 + h);
+        pos.setXYZ(i, v.x, v.y, v.z);
+
+        // Dynamic Coloring based on height
+        if (h > params.amp * 0.5) colorObj.setHex(0xffffff); // Peaks (Snow)
+        else if (h > 0) colorObj.setHex(0x55aa55);          // Land (Grass)
+        else colorObj.setHex(0x224488);                     // Lowlands (Water)
+        
+        colors.push(colorObj.r, colorObj.g, colorObj.b);
+    }
+
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    geo.computeVertexNormals();
+
+    const mat = new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        flatShading: true,
+        roughness: 0.8
+    });
+
+    planet = new THREE.Mesh(geo, mat);
+    scene.add(planet);
 }
 
-/* ---------------- PLANET ---------------- */
-
-function generatePlanet(){
-
-if(planet) scene.remove(planet);
-
-const geo=new THREE.SphereGeometry(30,128,128);
-
-const pos=geo.attributes.position;
-
-for(let i=0;i<pos.count;i++){
-
-let v=new THREE.Vector3();
-v.fromBufferAttribute(pos,i);
-
-let n=fractalNoise(
-v.x/params.scale,
-v.y/params.scale,
-v.z/params.scale
-);
-
-let h=n*params.amp;
-
-v.normalize().multiplyScalar(30+h);
-
-pos.setXYZ(i,v.x,v.y,v.z);
-
+function animate() {
+    requestAnimationFrame(animate);
+    if (planet) planet.rotation.y += 0.002;
+    renderer.render(scene, camera);
 }
 
-geo.computeVertexNormals();
+// UI Listeners
+document.getElementById("regen").onclick = generatePlanet;
 
-const mat=new THREE.MeshStandardMaterial({
-color:0x55aa55,
-flatShading:true
-});
+const setupInput = (id) => {
+    const el = document.getElementById(id);
+    el.oninput = (e) => {
+        params[id] = parseFloat(e.target.value);
+        document.getElementById(`v-${id}`).innerText = params[id];
+    };
+};
 
-planet=new THREE.Mesh(geo,mat);
-scene.add(planet);
+["scale", "amp", "oct"].forEach(setupInput);
 
+window.onresize = () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+};
+
+/* LAYERED AUDIO SYSTEM */
+function playNoiseSound() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    
+    const now = audioCtx.currentTime;
+    const duration = 3;
+    
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    const filter = audioCtx.createBiquadFilter();
+
+    osc.type = "triangle"; // Softer than sine for layered effects
+    filter.type = "lowpass";
+
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.2, now + 0.1);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + duration);
+
+    // Modulate frequency based on the SAME noise parameters
+    for (let i = 0; i < 60; i++) {
+        let t = now + (i * duration / 60);
+        let n = getLayeredNoise(i / 10, 0, 0, params.oct);
+        let freq = 110 + (n * 200) + (params.amp * 10);
+        osc.frequency.linearRampToValueAtTime(freq, t);
+    }
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    osc.start(now);
+    osc.stop(now + duration);
 }
 
-/* ---------------- LOOP ---------------- */
-
-function animate(){
-
-requestAnimationFrame(animate);
-
-if(planet){
-planet.rotation.y+=0.002;
-}
-
-renderer.render(scene,camera);
-
-}
+document.getElementById("sound").onclick = playNoiseSound;
 
 init();
-
-/* ---------------- UI ---------------- */
-
-document.getElementById("regen").onclick=()=>{
-generatePlanet();
-};
-
-document.getElementById("scale").oninput=(e)=>{
-params.scale=parseFloat(e.target.value);
-};
-
-document.getElementById("amp").oninput=(e)=>{
-params.amp=parseFloat(e.target.value);
-};
-
-document.getElementById("oct").oninput=(e)=>{
-params.oct=parseFloat(e.target.value);
-};
-
 </script>
-
-</body>
-</html>
-
-</script>
-
 </body>
 </html>
