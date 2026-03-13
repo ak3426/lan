@@ -1,12 +1,10 @@
 <!DOCTYPE html>
 <html>
-
 <head>
 <meta charset="UTF-8">
 <title>Procedural Planet Noise System</title>
 
 <style>
-
 body{
 margin:0;
 overflow:hidden;
@@ -20,17 +18,15 @@ top:20px;
 left:20px;
 background:white;
 padding:15px;
-border-radius:8px;
+border-radius:6px;
 width:220px;
 }
 
 button{
-margin-top:8px;
+margin-top:10px;
 width:100%;
-padding:8px;
-cursor:pointer;
+padding:6px;
 }
-
 </style>
 </head>
 
@@ -38,7 +34,7 @@ cursor:pointer;
 
 <div id="controls">
 
-<h3>Planet Generator</h3>
+<h3>Planet Controls</h3>
 
 Scale
 <input type="range" id="scale" min="10" max="150" value="50">
@@ -49,9 +45,7 @@ Amplitude
 Octaves
 <input type="range" id="oct" min="1" max="6" value="4">
 
-<button id="regen">Regenerate Planet</button>
-
-<button id="sound">Play Terrain Sound</button>
+<button id="regen">Regenerate</button>
 
 </div>
 
@@ -59,19 +53,101 @@ Octaves
 
 <script>
 
+/* ---------------- PERLIN NOISE ---------------- */
+
+class PerlinNoise{
+
+constructor(){
+this.p=[];
+
+for(let i=0;i<256;i++){
+this.p[i]=i;
+}
+
+for(let i=255;i>0;i--){
+let j=Math.floor(Math.random()*(i+1));
+[this.p[i],this.p[j]]=[this.p[j],this.p[i]];
+}
+
+this.p=this.p.concat(this.p);
+}
+
+fade(t){
+return t*t*t*(t*(t*6-15)+10);
+}
+
+lerp(t,a,b){
+return a+t*(b-a);
+}
+
+grad(hash,x,y,z){
+
+let h=hash&15;
+
+let u=h<8?x:y;
+let v=h<4?y:h===12||h===14?x:z;
+
+return((h&1)===0?u:-u)+((h&2)===0?v:-v);
+
+}
+
+noise(x,y,z){
+
+let X=Math.floor(x)&255;
+let Y=Math.floor(y)&255;
+let Z=Math.floor(z)&255;
+
+x-=Math.floor(x);
+y-=Math.floor(y);
+z-=Math.floor(z);
+
+let u=this.fade(x);
+let v=this.fade(y);
+let w=this.fade(z);
+
+let A=this.p[X]+Y;
+let AA=this.p[A]+Z;
+let AB=this.p[A+1]+Z;
+let B=this.p[X+1]+Y;
+let BA=this.p[B]+Z;
+let BB=this.p[B+1]+Z;
+
+return this.lerp(w,
+
+this.lerp(v,
+
+this.lerp(u,this.grad(this.p[AA],x,y,z),
+this.grad(this.p[BA],x-1,y,z)),
+
+this.lerp(u,this.grad(this.p[AB],x,y-1,z),
+this.grad(this.p[BB],x-1,y-1,z))
+),
+
+this.lerp(v,
+
+this.lerp(u,this.grad(this.p[AA+1],x,y,z-1),
+this.grad(this.p[BA+1],x-1,y,z-1)),
+
+this.lerp(u,this.grad(this.p[AB+1],x,y-1,z-1),
+this.grad(this.p[BB+1],x-1,y-1,z-1))
+)
+
+);
+
+}
+
+}
+
+/* ---------------- THREE SETUP ---------------- */
+
 let scene,camera,renderer,planet;
+let noise=new PerlinNoise();
 
 const params={
 scale:50,
 amp:8,
 oct:4
 };
-
-let time=0;
-
-function noise(x,y){
-return Math.sin(x*0.3)+Math.cos(y*0.3);
-}
 
 function init(){
 
@@ -92,8 +168,7 @@ renderer.setSize(window.innerWidth,window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
 const light=new THREE.DirectionalLight(0xffffff,1);
-light.position.set(30,50,50);
-
+light.position.set(50,50,50);
 scene.add(light);
 
 generatePlanet();
@@ -102,11 +177,39 @@ animate();
 
 }
 
+/* ---------------- FRACTAL NOISE ---------------- */
+
+function fractalNoise(x,y,z){
+
+let total=0;
+let frequency=1;
+let amplitude=1;
+let maxValue=0;
+
+for(let i=0;i<params.oct;i++){
+
+total+=noise.noise(
+x*frequency,
+y*frequency,
+z*frequency
+)*amplitude;
+
+maxValue+=amplitude;
+
+amplitude*=0.5;
+frequency*=2;
+
+}
+
+return total/maxValue;
+
+}
+
+/* ---------------- PLANET ---------------- */
+
 function generatePlanet(){
 
-if(planet){
-scene.remove(planet);
-}
+if(planet) scene.remove(planet);
 
 const geo=new THREE.SphereGeometry(30,128,128);
 
@@ -117,9 +220,10 @@ for(let i=0;i<pos.count;i++){
 let v=new THREE.Vector3();
 v.fromBufferAttribute(pos,i);
 
-let n=noise(
+let n=fractalNoise(
 v.x/params.scale,
-v.y/params.scale
+v.y/params.scale,
+v.z/params.scale
 );
 
 let h=n*params.amp;
@@ -138,16 +242,15 @@ flatShading:true
 });
 
 planet=new THREE.Mesh(geo,mat);
-
 scene.add(planet);
 
 }
 
+/* ---------------- LOOP ---------------- */
+
 function animate(){
 
 requestAnimationFrame(animate);
-
-time+=0.01;
 
 if(planet){
 planet.rotation.y+=0.002;
@@ -158,6 +261,8 @@ renderer.render(scene,camera);
 }
 
 init();
+
+/* ---------------- UI ---------------- */
 
 document.getElementById("regen").onclick=()=>{
 generatePlanet();
@@ -175,55 +280,10 @@ document.getElementById("oct").oninput=(e)=>{
 params.oct=parseFloat(e.target.value);
 };
 
+</script>
 
-
-
-
-/* AUDIO SYSTEM */
-
-let audioCtx;
-
-function playNoiseSound(){
-
-if(!audioCtx){
-audioCtx=new(window.AudioContext||window.webkitAudioContext)();
-}
-
-const duration=4;
-const now=audioCtx.currentTime;
-
-const osc=audioCtx.createOscillator();
-const gain=audioCtx.createGain();
-
-osc.type="sine";
-
-gain.gain.setValueAtTime(0,now);
-gain.gain.linearRampToValueAtTime(0.3,now+0.2);
-gain.gain.linearRampToValueAtTime(0,now+duration);
-
-osc.connect(gain);
-gain.connect(audioCtx.destination);
-
-for(let i=0;i<120;i++){
-
-let t=now+(i*duration/120);
-
-let n=noise(i/10,0);
-
-let freq=220+(n*150);
-
-osc.frequency.linearRampToValueAtTime(freq,t);
-
-}
-
-osc.start(now);
-osc.stop(now+duration);
-
-}
-
-document.getElementById("sound").onclick=()=>{
-playNoiseSound();
-};
+</body>
+</html>
 
 </script>
 
